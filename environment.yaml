@@ -13,3 +13,4 @@ dependencies:
     - boto3==1.34.79
     - reportlab==4.2.0
     - PyYAML==6.0.1
+    - openpyxl==3.1.5
