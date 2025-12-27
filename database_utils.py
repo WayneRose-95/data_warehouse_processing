@@ -251,6 +251,7 @@ class DatabaseConnector:
         self,
         dataframe: pd.DataFrame,
         connection : Engine,
+        target_schema : str,
         table_name: str,
         table_condition : str = "append" or "replace" or "fail",
         schema_config=None
@@ -289,10 +290,10 @@ class DatabaseConnector:
                 # Upload with a schema attached
                 column_types = schema_config["schemas"]["tables"][table_name]
                 table_schema = self.generate_table_schema(table_name, column_types)
-                dataframe.to_sql(table_name, con=connection, if_exists=table_condition, dtype={col.name: col.type for col in table_schema.columns}, index=False)
+                dataframe.to_sql(table_name, schema=target_schema, con=connection, if_exists=table_condition, method='multi', dtype={col.name: col.type for col in table_schema.columns}, index=False)
             else:
                 # Upload with no schema attached
-                dataframe.to_sql(table_name, con=connection, if_exists=table_condition, index=False)
+                dataframe.to_sql(table_name, schema=target_schema, con=connection, if_exists=table_condition, method='multi', index=False)
 
         except:
 
