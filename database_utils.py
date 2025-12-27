@@ -6,6 +6,7 @@ from sqlalchemy import MetaData, Table, Column, VARCHAR, DATE, FLOAT, SMALLINT, 
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.schema import CreateSchema
 import pandas as pd
 import os
 import logging
@@ -30,7 +31,7 @@ class DatabaseConnector:
             "DECIMAL": DECIMAL,
             "DATETIME": DATETIME 
         }
-    def read_database_credentials(self, config_file: yaml):
+    def read_database_credentials(self, config_file_name : str):
         """
         Method to read database_credentials from a yaml file
 
@@ -43,31 +44,22 @@ class DatabaseConnector:
         A dictionary of the database credentials from yaml file
 
         """
-
-        # Check if the file extension is YAML
-        valid_extensions = [".yaml", ".yml"]
-        name_of_file, file_extension = os.path.splitext(config_file)
-
-        if file_extension.lower() not in valid_extensions:
-            raise ValueError("Invalid file extension. Only YAML files are allowed.")
-        # Read the yaml file
         try:
         
-            with open(config_file) as file:
+            with open(config_file_name) as file:
                 database_credentials = yaml.safe_load(file)
 
             # Return the yaml file as a dictionary
             return database_credentials
         # If the file is not found, raise an exception
         except FileNotFoundError:
-
             raise FileNotFoundError("Config file not found")
         # If the config file is not in a YAML format, raise an exception
         except yaml.YAMLError:
             raise yaml.YAMLError("Invalid YAML format.")
 
     def create_connection_string(
-        self, config_file_name, connect_to_database=False, new_db_name=None
+        self, database_credentials : dict , connect_to_database=False, new_db_name=None
     ):
         """
         Method to create the connection_string needed to connect to a postgresql database
@@ -87,14 +79,11 @@ class DatabaseConnector:
         A string used to connect to the database
 
         """
-        # Call the database details method to use the dictionary as an output
-        database_credentials = self.read_database_credentials(config_file_name)
-        # If the database_credentials method fails
         # i.e. recieves the wrong weapon type
         if not database_credentials:
             raise Exception("Invalid database credentials.")
 
-        connection_string = f"postgresql+psycopg2://{database_credentials['RDS_USER']}:{database_credentials['RDS_PASSWORD']}@{database_credentials['RDS_HOST']}:{database_credentials['RDS_PORT']}"
+        connection_string = f"{database_credentials['DATABASE_TYPE']}+{database_credentials['DBAPI']}://{database_credentials['RDS_USER']}:{database_credentials['RDS_PASSWORD']}@{database_credentials['RDS_HOST']}:{database_credentials['RDS_PORT']}"
 
         if connect_to_database:
             if not new_db_name:
@@ -105,9 +94,7 @@ class DatabaseConnector:
 
     def initialise_database_connection(
         self,
-        config_file_name,
-        connect_to_database=False,
-        new_db_name=None,
+        connection_string : str,
         isolation_level="AUTOCOMMIT",
     ):
         """
@@ -135,10 +122,6 @@ class DatabaseConnector:
 
         """
 
-        connection_string = self.create_connection_string(
-            config_file_name, connect_to_database, new_db_name
-        )
-
         # Lastly try to connect to the database using your connection string variable
         try:
 
@@ -154,7 +137,7 @@ class DatabaseConnector:
             print("Error Connecting to the Database")
             raise OperationalError
 
-    def list_db_tables(self, engine : Engine): # , config_file_name: str, database_name: str
+    def list_db_tables(self, engine : Engine): 
         """
         Method to list the tables within a database
 
@@ -270,9 +253,6 @@ class DatabaseConnector:
         connection : Engine,
         table_name: str,
         table_condition : str = "append" or "replace" or "fail",
-        mapping: dict = None,
-        subset: list = None,
-        additional_rows: list = None,
         schema_config=None
     ):
         """
@@ -303,29 +283,6 @@ class DatabaseConnector:
         An optional parameter to add additional rows to the start of the dataframe. 
         By default, it is None 
         """
-        if mapping:
-            # Apply the mapping to the specified column
-            dataframe = dataframe.assign(
-                availability=dataframe["availability"].map(mapping)
-            )
-
-        if subset:
-            try:
-                # Filter rows based on the specified subset
-                dataframe = dataframe[
-                    dataframe["country_code"].isin(subset)
-                ]
-            except KeyError:
-                dataframe = dataframe[
-                    dataframe["currency_code"].isin(subset)
-                ]
-
-        if additional_rows:
-            # Add additional rows to the start of the table
-            additional_rows_df = pd.DataFrame(additional_rows)
-            dataframe = pd.concat(
-                [additional_rows_df, dataframe]
-            ).reset_index(drop=True)
         try:
 
             if schema_config:
@@ -341,6 +298,13 @@ class DatabaseConnector:
 
             print("Error uploading table to the database")
             raise Exception
+    
+    def create_schema(self, database_engine : Engine, schema_name : str):
+
+        conn = database_engine.connect() 
+        if not conn.dialect.has_schema(conn, schema_name):
+            conn.execute(CreateSchema(schema_name, if_not_exists=True))
+            return conn 
         
     def create_database(self, database_name: str, connection_string : str):
         # Create the database with the provided database_name and database_username
@@ -396,7 +360,7 @@ class DatabaseConnector:
             )
             raise Exception
 
-        finally:\
+        finally:
             session.close()
 
 if __name__ == "__main__":
