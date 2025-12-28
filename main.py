@@ -46,7 +46,7 @@ else:
 etl_timestamp = pd.Timestamp.now(tz="UTC")
 metadata_df["etl_load_datetime"] = etl_timestamp
 metadata_df["etl_effective_from"] = etl_timestamp
-metadata_df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:00", tz="UTC")
+metadata_df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
 
 print(metadata_df)
 
@@ -66,7 +66,9 @@ else:
 
 
 # Extracting tables from source db 
-list_of_source_tables_raw = metadata_df['OBJECT_NAME'].to_list() 
+metadata_table = pd.read_sql_table('metadata_table', con=database_connect_target, schema='metadata')
+
+list_of_source_tables_raw = metadata_table['OBJECT_NAME'].to_list() 
 
 list_of_source_tables = [t.strip() for t in list_of_source_tables_raw]
 print(list_of_source_tables)
@@ -78,11 +80,11 @@ for object in list_of_source_tables:
     etl_timestamp = pd.Timestamp.now(tz="UTC")
     df["etl_load_datetime"] = etl_timestamp
     df["etl_effective_from"] = etl_timestamp
-    df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:00", tz="UTC")
+    df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
     # set the key of the object name to the completed dataframe 
     source_tables_dict[object] = df 
 
 
 for key, value in source_tables_dict.items():
-    connection.upload_to_db(value, database_connect_target, 'staging', f'stg_{key}', 'replace')
+    connection.upload_to_db(value, database_connect_target, 'staging', f"stg_{metadata_df.iloc[1,0]}_{key}", 'replace')
 
