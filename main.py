@@ -68,23 +68,22 @@ else:
 # Extracting tables from source db 
 metadata_table = pd.read_sql_table('metadata_table', con=database_connect_target, schema='metadata')
 
-list_of_source_tables_raw = metadata_table['OBJECT_NAME'].to_list() 
-
-list_of_source_tables = [t.strip() for t in list_of_source_tables_raw]
-print(list_of_source_tables)
+# Creating list of dictionaries using pd.to_dict() method 
+metadata_table_dict = metadata_df.to_dict(orient="records")
 
 source_tables_dict = {}
 
-for object in list_of_source_tables:
-    df = pd.read_sql_table(object, con=database_connect_source, schema='public')
+# Creating a dictionary of dataframes to upload to the database
+for object in metadata_table_dict:
+    df = pd.read_sql(f"SELECT {object['DATA_ITEMS']} FROM {object['OBJECT_NAME']} {object['WHERE_CLAUSE']}", con=database_connect_source)
     etl_timestamp = pd.Timestamp.now(tz="UTC")
     df["etl_load_datetime"] = etl_timestamp
     df["etl_effective_from"] = etl_timestamp
     df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
     # set the key of the object name to the completed dataframe 
-    source_tables_dict[object] = df 
+    source_tables_dict[object['OBJECT_NAME']] = df 
 
-
+# Uploading each of the tables
 for key, value in source_tables_dict.items():
     connection.upload_to_db(value, database_connect_target, 'staging', f"stg_{metadata_df.iloc[1,0]}_{key}", 'replace')
 
