@@ -87,3 +87,6 @@ for object in metadata_table_dict:
 for key, value in source_tables_dict.items():
     connection.upload_to_db(value, database_connect_target, 'staging', f"stg_{metadata_df.iloc[1,0]}_{key}", 'replace')
 
+
+#---- SOURCE HISTORY LAYER -----
+

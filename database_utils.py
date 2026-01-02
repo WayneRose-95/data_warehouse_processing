@@ -306,6 +306,35 @@ class DatabaseConnector:
         if not conn.dialect.has_schema(conn, schema_name):
             conn.execute(CreateSchema(schema_name, if_not_exists=True))
             return conn 
+    
+    def check_table(self, schema_name :str , table_name :str, connection : Engine):
+        print(schema_name)
+        print(table_name)
+        check_table_statement = pd.read_sql(f"""
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = {schema_name}
+                AND table_name = {table_name}
+            );
+        """, con=connection)
+        print(check_table_statement["exists"].item())
+
+        if check_table_statement["exists"].item() == True:
+            return True
+        else:
+            return False
+    
+    def extract_hwm_value(self, schema_name :str , table_name :str, connection : Engine, hwm_value : str):
+        hwm_statement = pd.read_sql(
+        f"""
+        SELECT MAX({hwm_value}) FROM {schema_name}.{table_name} 
+        """
+        , con=connection
+            
+        )
+        hwm_value_raw = hwm_statement['max'].item()
+        return hwm_value_raw
         
     def create_database(self, database_name: str, connection_string : str):
         # Create the database with the provided database_name and database_username
