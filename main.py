@@ -75,13 +75,36 @@ source_tables_dict = {}
 
 # Creating a dictionary of dataframes to upload to the database
 for object in metadata_table_dict:
-    df = pd.read_sql(f"SELECT {object['DATA_ITEMS']} FROM {object['OBJECT_NAME']} {object['WHERE_CLAUSE']}", con=database_connect_source)
-    etl_timestamp = pd.Timestamp.now(tz="UTC")
-    df["etl_load_datetime"] = etl_timestamp
-    df["etl_effective_from"] = etl_timestamp
-    df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
-    # set the key of the object name to the completed dataframe 
-    source_tables_dict[object['OBJECT_NAME']] = df 
+    if object['LOAD_TYPE'] == 'DELTA':
+        table_check = connection.check_table("'staging'", f"'stg_job_{object['OBJECT_NAME']}'", database_connect_target)
+        if table_check == True: 
+            #Extract the HWM value
+            hwm_value = connection.extract_hwm_value("staging", f"stg_job_{object['OBJECT_NAME']}", database_connect_target, object['HWM_VALUE'])
+            object['WHERE_CLAUSE'] = (f"WHERE {object['HWM_VALUE']} > {hwm_value}")
+            df = pd.read_sql(f"SELECT {object['DATA_ITEMS']} FROM {object['OBJECT_NAME']} {object['WHERE_CLAUSE']}", con=database_connect_source)
+            df["etl_load_datetime"] = etl_timestamp
+            df["etl_effective_from"] = etl_timestamp
+            df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
+            source_tables_dict[object['OBJECT_NAME']] = df 
+        else:
+            # Treat the table like it's a full load
+            df = pd.read_sql(f"SELECT {object['DATA_ITEMS']} FROM {object['OBJECT_NAME']} {object['WHERE_CLAUSE']}", con=database_connect_source)
+            etl_timestamp = pd.Timestamp.now(tz="UTC")
+            df["etl_load_datetime"] = etl_timestamp
+            df["etl_effective_from"] = etl_timestamp
+            df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
+            # set the key of the object name to the completed dataframe 
+            source_tables_dict[object['OBJECT_NAME']] = df
+
+    else:
+        # Load the table in as a FULL load 
+        df = pd.read_sql(f"SELECT {object['DATA_ITEMS']} FROM {object['OBJECT_NAME']} {object['WHERE_CLAUSE']}", con=database_connect_source)
+        etl_timestamp = pd.Timestamp.now(tz="UTC")
+        df["etl_load_datetime"] = etl_timestamp
+        df["etl_effective_from"] = etl_timestamp
+        df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
+        # set the key of the object name to the completed dataframe 
+        source_tables_dict[object['OBJECT_NAME']] = df 
 
 # Uploading each of the tables
 for key, value in source_tables_dict.items():
