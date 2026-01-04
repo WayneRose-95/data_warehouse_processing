@@ -34,6 +34,8 @@ if database_connect_target:
     print(f'connection successful to {database_connect_target}')
 
 # --- METADATA CREATION --- 
+#TODO: Once the Source History Layer has completed, apply similar logic for the metadata layer to retain historical records. 
+# Apply this new staged metadata table to the staging layer. 
 # creating metadata schema 
 metadata_schema = connection.create_schema(database_connect_target, 'metadata')
 
@@ -113,3 +115,14 @@ for key, value in source_tables_dict.items():
 
 #---- SOURCE HISTORY LAYER -----
 
+# On the first run, load all tables in as normal 
+
+# On the second run, compare rows between tables identifying different types of records
+"""
+Creating a column called ETL_RECORD_INDICATOR 
+Should have the following 
+New Records = N 
+Identical Records = I 
+Changed Records = C 
+Deleted Records = D 
+"""
