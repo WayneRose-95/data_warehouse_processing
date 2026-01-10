@@ -115,9 +115,40 @@ for key, value in source_tables_dict.items():
 
 #---- SOURCE HISTORY LAYER -----
 
-# On the first run, load all tables in as normal 
 
+
+# Creating source_history schema 
+
+source_history_schema = connection.create_schema(database_connect_target, 'history')
 # On the second run, compare rows between tables identifying different types of records
+
+# On the first run, load all tables in as normal adding a new column etl_record_indicator 
+
+# Create a column called etl_record_indicator, and set it to N for New 
+# Select all table names within the staging schema. Add these to a list
+stage_table_names_table = pd.read_sql_query(f"""SELECT * FROM information_schema.tables WHERE table_schema = 'staging';""", con=database_connect_target) 
+list_of_stage_table_names = stage_table_names_table['table_name'].to_list()
+
+history_table_dict = {}
+for table_name in list_of_stage_table_names:
+    if connection.check_table("'history'", f"'{table_name}'", database_connect_target) == False:
+        print(f'Table {table_name} does not exist')
+        stage_table = pd.read_sql_table(table_name, database_connect_target, schema='staging')
+        stage_table['etl_record_indicator'] = 'N'
+        # Update the etl_load_datetime and etl_effective_from fields 
+        now = pd.Timestamp.now(tz="UTC")
+        stage_table["etl_load_datetime"] = now
+        stage_table["etl_load_datetime"] = now
+        # Add the table_name and modified dataframe to the history_table_dict
+        history_table_dict[table_name] = stage_table
+
+# Upload the table to the history layer 1st run 
+for key, value in history_table_dict.items():
+    connection.upload_to_db(value, database_connect_target, 'history', f"history_{metadata_df.iloc[1,0]}_{key}", 'replace')
+
+
+
+
 """
 Creating a column called ETL_RECORD_INDICATOR 
 Should have the following 
