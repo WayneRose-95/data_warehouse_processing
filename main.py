@@ -1,8 +1,11 @@
 from database_utils import DatabaseConnector
+from table_history import TableHistoryProcessor
+from sqlalchemy import text
 import pandas as pd 
 
 # Instantiation of Classes 
 connection = DatabaseConnector() 
+table_histories = TableHistoryProcessor() 
 # Reading in backend secrets configuration file 
 config_file = connection.read_database_credentials('db_creds.yaml')
 # Creating pandas dataframe from excel metadata spreadsheet 
@@ -10,7 +13,7 @@ metadata_df = pd.read_excel('metadata.xlsx')
 print(metadata_df)
 
 # Extracting connection string from metadata excel spreadsheet 
-conn_string_dict = metadata_df['CONNECTION'].to_dict()
+conn_string_dict = metadata_df['connection'].to_dict()
 
 
 # Creating connection string to connect to database
@@ -19,7 +22,7 @@ full_connection_string_server = secret_conn_string.replace('***', config_file['R
 # print(full_connection_string_server)
 
 # Extract database_name from the metadata spreadsheet 
-new_db_name_dict = metadata_df['DATABASE_NAME'].to_dict()
+new_db_name_dict = metadata_df['database_name'].to_dict()
 new_db_name = new_db_name_dict[0]
 
 full_connection_string_target = full_connection_string_server + f"/{new_db_name}"
@@ -44,78 +47,134 @@ if metadata_schema:
 else: 
     print('schema already exists')
 #TODO: Check if the current metadata_table exists 
-#TODO: If the table exists, then perform the historical logic. 
-# First Run: Add ETL columns to metadata table 
-etl_timestamp = pd.Timestamp.now(tz="UTC")
-metadata_df["etl_load_datetime"] = etl_timestamp
-metadata_df["etl_effective_from"] = etl_timestamp
-metadata_df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
-metadata_df["etl_record_indicator"] = 'N'
+metadata_table_check = connection.check_table("'metadata'", f"'stage_data_objects_source'", database_connect_target)
+if metadata_table_check == True: 
+    print('Table already exists')
+    # Upload the initial load_metadata table 
+    etl_timestamp = pd.Timestamp.now(tz="UTC")
+    metadata_df["etl_load_datetime"] = etl_timestamp
+    metadata_df["etl_effective_from"] = etl_timestamp
+    metadata_df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
+    metadata_df["etl_record_indicator"] = 'N'
+    metadata_df['etl_active_flag'] = True
+    # Upload the initial metadata table to database.
+    connection.upload_to_db(metadata_df, database_connect_target, 'metadata','load_data_objects_source','replace')
 
-print(metadata_df)
+    # Read in current metadata table 
+    current_metadata_table = pd.read_sql_table('load_data_objects_source', database_connect_target, schema='metadata')
+    metadata_df['row_hash'] = table_histories.build_row_hash(metadata_df, None)
+    current_metadata_table['row_hash'] = table_histories.build_row_hash(current_metadata_table, None)
+    comparison_df = table_histories.compare_new_vs_exisiting(current_metadata_table, metadata_df, metadata_df['business_keys'], 'outer')
+    record_indicator_df = table_histories.assign_record_indicator(comparison_df)
+    # Removing old columns and replacing them with the new columns.
+    cleaned_df = (
+    record_indicator_df
+    .drop(columns=record_indicator_df.filter(regex="_old$").columns)
+    # Rename the _new columns
+    .rename(columns=lambda c: c.replace("_new", ""))
+    )
+    cleaned_df.drop(columns=['row_hash', 'key_0'], inplace=True)
+    cleaned_df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
+    connection.upload_to_db(cleaned_df, database_connect_target, 'metadata', 'stage_data_objects_source', 'append')
+    # Updating the etl_active_record column post load 
+    update_active_sql = text("""
+    UPDATE metadata.stage_data_objects_source
+    SET etl_active_flag = TRUE
+    WHERE etl_record_indicator IN ('C', 'I');
+    """)
 
-# Upload the initial metadata table to database.
-connection.upload_to_db(metadata_df, database_connect_target, 'metadata','metadata_table','replace')
+    update_inactive_sql = text("""
+    UPDATE metadata.stage_data_objects_source
+    SET etl_active_flag = FALSE
+    WHERE etl_record_indicator = 'N';
+    """)
+    with database_connect_target.begin() as conn:
+        conn.execute(update_active_sql)
+        conn.execute(update_inactive_sql)
+else:
+    #TODO: If the table exists, then perform the historical logic. 
+    # First Run: Add ETL columns to metadata table 
+    etl_timestamp = pd.Timestamp.now(tz="UTC")
+    metadata_df["etl_load_datetime"] = etl_timestamp
+    metadata_df["etl_effective_from"] = etl_timestamp
+    metadata_df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
+    metadata_df["etl_record_indicator"] = 'N'
+    metadata_df["etl_active_flag"] = True
+
+    print(metadata_df)
+
+    # Upload the initial metadata table to database.
+    connection.upload_to_db(metadata_df, database_connect_target, 'metadata','load_data_objects_source','replace')
+
+    etl_timestamp = pd.Timestamp.now(tz="UTC")
+    # Update the metadata columns for the staging metadata table 
+    metadata_df["etl_load_datetime"] = etl_timestamp
+    metadata_df["etl_effective_from"] = etl_timestamp
+    metadata_df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
+    metadata_df["etl_record_indicator"] = 'N'
+    metadata_df['etl_active_flag'] = True
+
+    connection.upload_to_db(metadata_df, database_connect_target, 'metadata','stage_data_objects_source','replace')
+
+
 
 # Upload the stage metadata table to the database to keep track of the history / changes 
-
-#TODO: Add historical logic to metadata_table 
 
 # -- STAGING LAYER -- 
 
 # creating metadata schema 
-staging_schema = connection.create_schema(database_connect_target, 'staging')
+# staging_schema = connection.create_schema(database_connect_target, 'staging')
 
-if staging_schema:
-    print(f"schema created on {config_file['RDS_DATABASE']}")
-else: 
-    print('schema already exists')
+# if staging_schema:
+#     print(f"schema created on {config_file['RDS_DATABASE']}")
+# else: 
+#     print('schema already exists')
 
 
-# Extracting tables from source db 
-metadata_table = pd.read_sql_table('metadata_table', con=database_connect_target, schema='metadata')
+# # Extracting tables from source db 
+# metadata_table = pd.read_sql_table('metadata_table', con=database_connect_target, schema='metadata')
 
-# Creating list of dictionaries using pd.to_dict() method 
-metadata_table_dict = metadata_df.to_dict(orient="records")
+# # Creating list of dictionaries using pd.to_dict() method 
+# metadata_table_dict = metadata_df.to_dict(orient="records")
 
-source_tables_dict = {}
+# source_tables_dict = {}
 
-# Creating a dictionary of dataframes to upload to the database
-for object in metadata_table_dict:
-    if object['LOAD_TYPE'] == 'DELTA':
-        table_check = connection.check_table("'staging'", f"'stg_job_{object['OBJECT_NAME']}'", database_connect_target)
-        if table_check == True: 
-            #Extract the HWM value
-            hwm_value = connection.extract_hwm_value("staging", f"stg_job_{object['OBJECT_NAME']}", database_connect_target, object['HWM_VALUE'])
-            object['WHERE_CLAUSE'] = (f"WHERE {object['HWM_VALUE']} > {hwm_value}")
-            df = pd.read_sql(f"SELECT {object['DATA_ITEMS']} FROM {object['OBJECT_NAME']} {object['WHERE_CLAUSE']}", con=database_connect_source)
-            df["etl_load_datetime"] = etl_timestamp
-            df["etl_effective_from"] = etl_timestamp
-            df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
-            source_tables_dict[object['OBJECT_NAME']] = df 
-        else:
-            # Treat the table like it's a full load
-            df = pd.read_sql(f"SELECT {object['DATA_ITEMS']} FROM {object['OBJECT_NAME']} {object['WHERE_CLAUSE']}", con=database_connect_source)
-            etl_timestamp = pd.Timestamp.now(tz="UTC")
-            df["etl_load_datetime"] = etl_timestamp
-            df["etl_effective_from"] = etl_timestamp
-            df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
-            # set the key of the object name to the completed dataframe 
-            source_tables_dict[object['OBJECT_NAME']] = df
+# # Creating a dictionary of dataframes to upload to the database
+# for object in metadata_table_dict:
+#     if object['LOAD_TYPE'] == 'DELTA':
+#         table_check = connection.check_table("'staging'", f"'stg_job_{object['OBJECT_NAME']}'", database_connect_target)
+#         if table_check == True: 
+#             #Extract the HWM value
+#             hwm_value = connection.extract_hwm_value("staging", f"stg_job_{object['OBJECT_NAME']}", database_connect_target, object['HWM_VALUE'])
+#             object['WHERE_CLAUSE'] = (f"WHERE {object['HWM_VALUE']} > {hwm_value}")
+#             df = pd.read_sql(f"SELECT {object['DATA_ITEMS']} FROM {object['OBJECT_NAME']} {object['WHERE_CLAUSE']}", con=database_connect_source)
+#             df["etl_load_datetime"] = etl_timestamp
+#             df["etl_effective_from"] = etl_timestamp
+#             df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
+#             source_tables_dict[object['OBJECT_NAME']] = df 
+#         else:
+#             # Treat the table like it's a full load
+#             df = pd.read_sql(f"SELECT {object['DATA_ITEMS']} FROM {object['OBJECT_NAME']} {object['WHERE_CLAUSE']}", con=database_connect_source)
+#             etl_timestamp = pd.Timestamp.now(tz="UTC")
+#             df["etl_load_datetime"] = etl_timestamp
+#             df["etl_effective_from"] = etl_timestamp
+#             df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
+#             # set the key of the object name to the completed dataframe 
+#             source_tables_dict[object['OBJECT_NAME']] = df
 
-    else:
-        # Load the table in as a FULL load 
-        df = pd.read_sql(f"SELECT {object['DATA_ITEMS']} FROM {object['OBJECT_NAME']} {object['WHERE_CLAUSE']}", con=database_connect_source)
-        etl_timestamp = pd.Timestamp.now(tz="UTC")
-        df["etl_load_datetime"] = etl_timestamp
-        df["etl_effective_from"] = etl_timestamp
-        df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
-        # set the key of the object name to the completed dataframe 
-        source_tables_dict[object['OBJECT_NAME']] = df 
+#     else:
+#         # Load the table in as a FULL load 
+#         df = pd.read_sql(f"SELECT {object['DATA_ITEMS']} FROM {object['OBJECT_NAME']} {object['WHERE_CLAUSE']}", con=database_connect_source)
+#         etl_timestamp = pd.Timestamp.now(tz="UTC")
+#         df["etl_load_datetime"] = etl_timestamp
+#         df["etl_effective_from"] = etl_timestamp
+#         df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
+#         # set the key of the object name to the completed dataframe 
+#         source_tables_dict[object['OBJECT_NAME']] = df 
 
-# Uploading each of the tables
-for key, value in source_tables_dict.items():
-    connection.upload_to_db(value, database_connect_target, 'staging', f"stg_{metadata_df.iloc[1,0]}_{key}", 'replace')
+# # Uploading each of the tables
+# for key, value in source_tables_dict.items():
+#     connection.upload_to_db(value, database_connect_target, 'staging', f"stg_{metadata_df.iloc[1,0]}_{key}", 'replace')
 
 
 #---- SOURCE HISTORY LAYER -----
