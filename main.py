@@ -208,7 +208,7 @@ for key, value in source_tables_dict.items():
 
 # Creating source_history schema 
 
-# source_history_schema = connection.create_schema(database_connect_target, 'history')
+source_history_schema = connection.create_schema(database_connect_target, 'history')
 # # # On the second run, compare rows between tables identifying different types of records
 
 # # # On the first run, load all tables in as normal adding a new column etl_record_indicator 
@@ -233,7 +233,7 @@ for table_name in list_of_stage_table_names:
         stage_table["etl_load_datetime"] = now
         stage_table["etl_load_datetime"] = now
         # Add the table_name and modified dataframe to the history_table_dict
-        table_name = f"{table_name.strip(f'stg_{etl_source_code}_')}"
+        table_name = table_name.replace(f'stage_{etl_source_code}_', '')
         history_table_dict[table_name] = stage_table
     else:
         #TODO: Implement Historical Table logic here or implement it above assuming check_table returns True
