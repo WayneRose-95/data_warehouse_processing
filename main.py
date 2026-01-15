@@ -89,9 +89,33 @@ if metadata_table_check == True:
     SET etl_active_flag = FALSE
     WHERE etl_record_indicator = 'N';
     """)
+
+    update_current_records_sql = text(
+    """
+    UPDATE metadata.stage_data_objects_source sm
+    SET etl_active_flag = CASE
+        WHEN sm.etl_effective_from = latest.max_effective_from THEN TRUE
+        ELSE FALSE
+    END
+    FROM (
+        SELECT
+            SOURCE,
+            SOURCE_TYPE,
+            OBJECT_NAME,
+            MAX(etl_effective_from) AS max_effective_from
+        FROM metadata.stage_data_objects_source
+        WHERE etl_record_indicator IN ('C', 'I')
+        GROUP BY SOURCE, SOURCE_TYPE, OBJECT_NAME
+    ) latest
+    WHERE sm.SOURCE = latest.SOURCE
+    AND sm.SOURCE_TYPE = latest.SOURCE_TYPE
+    AND sm.OBJECT_NAME = latest.OBJECT_NAME;
+    """
+    )
     with database_connect_target.begin() as conn:
         conn.execute(update_active_sql)
         conn.execute(update_inactive_sql)
+        conn.execute(update_current_records_sql)
 else:
     #TODO: If the table exists, then perform the historical logic. 
     # First Run: Add ETL columns to metadata table 
