@@ -12,6 +12,7 @@ config_file = connection.read_database_credentials('db_creds.yaml')
 metadata_df = pd.read_excel('metadata.xlsx')
 print(metadata_df)
 
+etl_source_code = metadata_df.iloc[1,0]
 # Extracting connection string from metadata excel spreadsheet 
 conn_string_dict = metadata_df['connection'].to_dict()
 
@@ -123,58 +124,58 @@ else:
 # -- STAGING LAYER -- 
 
 # creating metadata schema 
-# staging_schema = connection.create_schema(database_connect_target, 'staging')
+staging_schema = connection.create_schema(database_connect_target, 'staging')
 
-# if staging_schema:
-#     print(f"schema created on {config_file['RDS_DATABASE']}")
-# else: 
-#     print('schema already exists')
+if staging_schema:
+    print(f"schema created on {config_file['RDS_DATABASE']}")
+else: 
+    print('schema already exists')
 
 
-# # Extracting tables from source db 
-# metadata_table = pd.read_sql_table('metadata_table', con=database_connect_target, schema='metadata')
+# Extracting tables from source db 
+metadata_table = pd.read_sql_table('load_data_objects_source', con=database_connect_target, schema='metadata')
 
-# # Creating list of dictionaries using pd.to_dict() method 
-# metadata_table_dict = metadata_df.to_dict(orient="records")
+# Creating list of dictionaries using pd.to_dict() method 
+metadata_table_dict = metadata_df.to_dict(orient="records")
 
-# source_tables_dict = {}
+source_tables_dict = {}
 
-# # Creating a dictionary of dataframes to upload to the database
-# for object in metadata_table_dict:
-#     if object['LOAD_TYPE'] == 'DELTA':
-#         table_check = connection.check_table("'staging'", f"'stg_job_{object['OBJECT_NAME']}'", database_connect_target)
-#         if table_check == True: 
-#             #Extract the HWM value
-#             hwm_value = connection.extract_hwm_value("staging", f"stg_job_{object['OBJECT_NAME']}", database_connect_target, object['HWM_VALUE'])
-#             object['WHERE_CLAUSE'] = (f"WHERE {object['HWM_VALUE']} > {hwm_value}")
-#             df = pd.read_sql(f"SELECT {object['DATA_ITEMS']} FROM {object['OBJECT_NAME']} {object['WHERE_CLAUSE']}", con=database_connect_source)
-#             df["etl_load_datetime"] = etl_timestamp
-#             df["etl_effective_from"] = etl_timestamp
-#             df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
-#             source_tables_dict[object['OBJECT_NAME']] = df 
-#         else:
-#             # Treat the table like it's a full load
-#             df = pd.read_sql(f"SELECT {object['DATA_ITEMS']} FROM {object['OBJECT_NAME']} {object['WHERE_CLAUSE']}", con=database_connect_source)
-#             etl_timestamp = pd.Timestamp.now(tz="UTC")
-#             df["etl_load_datetime"] = etl_timestamp
-#             df["etl_effective_from"] = etl_timestamp
-#             df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
-#             # set the key of the object name to the completed dataframe 
-#             source_tables_dict[object['OBJECT_NAME']] = df
+# Creating a dictionary of dataframes to upload to the database
+for object in metadata_table_dict:
+    if object['load_type'] == 'DELTA':
+        table_check = connection.check_table("'staging'", f"'stage_{etl_source_code}_{object['object_name']}'", database_connect_target)
+        if table_check == True: 
+            #Extract the HWM value
+            hwm_value = connection.extract_hwm_value("staging", f"stage_{etl_source_code}_{object['object_name']}", database_connect_target, object['hwm_value'])
+            object['where_clause'] = (f"WHERE {object['hwm_value']} > {hwm_value}")
+            df = pd.read_sql(f"SELECT {object['data_items']} FROM {object['object_name']} {object['where_clause']}", con=database_connect_source)
+            df["etl_load_datetime"] = etl_timestamp
+            df["etl_effective_from"] = etl_timestamp
+            df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
+            source_tables_dict[object['object_name']] = df 
+        else:
+            # Treat the table like it's a full load
+            df = pd.read_sql(f"SELECT {object['data_items']} FROM {object['object_name']} {object['where_clause']}", con=database_connect_source)
+            etl_timestamp = pd.Timestamp.now(tz="UTC")
+            df["etl_load_datetime"] = etl_timestamp
+            df["etl_effective_from"] = etl_timestamp
+            df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
+            # set the key of the object name to the completed dataframe 
+            source_tables_dict[object['object_name']] = df
 
-#     else:
-#         # Load the table in as a FULL load 
-#         df = pd.read_sql(f"SELECT {object['DATA_ITEMS']} FROM {object['OBJECT_NAME']} {object['WHERE_CLAUSE']}", con=database_connect_source)
-#         etl_timestamp = pd.Timestamp.now(tz="UTC")
-#         df["etl_load_datetime"] = etl_timestamp
-#         df["etl_effective_from"] = etl_timestamp
-#         df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
-#         # set the key of the object name to the completed dataframe 
-#         source_tables_dict[object['OBJECT_NAME']] = df 
+    else:
+        # Load the table in as a FULL load 
+        df = pd.read_sql(f"SELECT {object['data_items']} FROM {object['object_name']} {object['where_clause']}", con=database_connect_source)
+        etl_timestamp = pd.Timestamp.now(tz="UTC")
+        df["etl_load_datetime"] = etl_timestamp
+        df["etl_effective_from"] = etl_timestamp
+        df["etl_effective_to"] = pd.Timestamp("9999-12-31 23:59:59", tz="UTC")
+        # set the key of the object name to the completed dataframe 
+        source_tables_dict[object['object_name']] = df 
 
-# # Uploading each of the tables
-# for key, value in source_tables_dict.items():
-#     connection.upload_to_db(value, database_connect_target, 'staging', f"stg_{metadata_df.iloc[1,0]}_{key}", 'replace')
+# Uploading each of the tables
+for key, value in source_tables_dict.items():
+    connection.upload_to_db(value, database_connect_target, 'staging', f"stage_{etl_source_code}_{key}", 'replace')
 
 
 #---- SOURCE HISTORY LAYER -----
@@ -184,31 +185,39 @@ else:
 # Creating source_history schema 
 
 # source_history_schema = connection.create_schema(database_connect_target, 'history')
-# # On the second run, compare rows between tables identifying different types of records
+# # # On the second run, compare rows between tables identifying different types of records
 
-# # On the first run, load all tables in as normal adding a new column etl_record_indicator 
+# # # On the first run, load all tables in as normal adding a new column etl_record_indicator 
 
-# # Create a column called etl_record_indicator, and set it to N for New 
-# # Select all table names within the staging schema. Add these to a list
-# stage_table_names_table = pd.read_sql_query(f"""SELECT * FROM information_schema.tables WHERE table_schema = 'staging';""", con=database_connect_target) 
-# list_of_stage_table_names = stage_table_names_table['table_name'].to_list()
+# # # Create a column called etl_record_indicator, and set it to N for New 
+# # # Select all table names within the staging schema. Add these to a list
+metdata_table_names = pd.read_sql_table("stage_data_objects_source", con=database_connect_target, schema='metadata') 
+stage_table_names_table = pd.read_sql_query(f"""SELECT * FROM information_schema.tables WHERE table_schema = 'staging';""", con=database_connect_target) 
+current_records_table = metdata_table_names[metdata_table_names['etl_active_flag'] == True]
+list_of_stage_table_names = stage_table_names_table['table_name'].to_list()
+metadata_table_dict_reference = metdata_table_names.to_dict() 
 
-# history_table_dict = {}
-# for table_name in list_of_stage_table_names:
-#     if connection.check_table("'history'", f"'{table_name}'", database_connect_target) == False:
-#         print(f'Table {table_name} does not exist')
-#         stage_table = pd.read_sql_table(table_name, database_connect_target, schema='staging')
-#         stage_table['etl_record_indicator'] = 'N'
-#         # Update the etl_load_datetime and etl_effective_from fields 
-#         now = pd.Timestamp.now(tz="UTC")
-#         stage_table["etl_load_datetime"] = now
-#         stage_table["etl_load_datetime"] = now
-#         # Add the table_name and modified dataframe to the history_table_dict
-#         history_table_dict[table_name] = stage_table
 
-# # Upload the table to the history layer 1st run 
-# for key, value in history_table_dict.items():
-#     connection.upload_to_db(value, database_connect_target, 'history', f"history_{metadata_df.iloc[1,0]}_{key}", 'replace')
+history_table_dict = {}
+for table_name in list_of_stage_table_names:
+    if connection.check_table("'history'", f"'{table_name}'", database_connect_target) == False:
+        print(f'Table {table_name} does not exist')
+        stage_table = pd.read_sql_table(table_name, database_connect_target, schema='staging')
+        stage_table['etl_record_indicator'] = 'N'
+        # Update the etl_load_datetime and etl_effective_from fields 
+        now = pd.Timestamp.now(tz="UTC")
+        stage_table["etl_load_datetime"] = now
+        stage_table["etl_load_datetime"] = now
+        # Add the table_name and modified dataframe to the history_table_dict
+        table_name = f"{table_name.strip(f'stg_{etl_source_code}_')}"
+        history_table_dict[table_name] = stage_table
+    else:
+        #TODO: Implement Historical Table logic here or implement it above assuming check_table returns True
+        pass
+
+# Upload the table to the history layer 1st run 
+for key, value in history_table_dict.items():
+    connection.upload_to_db(value, database_connect_target, 'history', f"history_{etl_source_code}_{key}", 'replace')
 
 
 
