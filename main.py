@@ -227,21 +227,41 @@ metdata_table_names = pd.read_sql_table("stage_data_objects_source", con=databas
 stage_table_names_table = pd.read_sql_query(f"""SELECT * FROM information_schema.tables WHERE table_schema = 'staging';""", con=database_connect_target) 
 current_records_table = metdata_table_names[metdata_table_names['etl_active_flag'] == True]
 list_of_stage_table_names = stage_table_names_table['table_name'].to_list()
-metadata_table_dict_reference = metdata_table_names.to_dict() 
+metadata_table_dict_reference = metdata_table_names.to_dict()
+
+try:
+    history_table_names_table = pd.read_sql_query(f"""SELECT * FROM information_schema.tables WHERE table_schema = 'history';""", con=database_connect_target) 
+    history_table_names_list = history_table_names_table['table_name'].to_list()
+except:
+    print('History tables not present. Will create')
+
 
 
 history_table_dict = {}
-# FIRST RUN of History Layer
-for table_name in list_of_stage_table_names:
-    stage_table = pd.read_sql_table(table_name, database_connect_target, schema='staging')
-    stage_table['etl_record_indicator'] = 'N'
-    # Update the etl_load_datetime and etl_effective_from fields 
-    now = pd.Timestamp.now(tz="UTC")
-    stage_table["etl_load_datetime"] = now
-    stage_table["etl_load_datetime"] = now
-    # Add the table_name and modified dataframe to the history_table_dict
-    table_name = table_name.replace(f'stage_{etl_source_code}_', '')
-    history_table_dict[table_name] = stage_table
+if history_table_names_list:
+    for table_name in history_table_names_list:
+    # Read in the stage table and the current history table 
+
+    # Compare both tables using compare_new_vs_existing method 
+    # Assign the record indicator 
+
+    # Drop columns 
+
+    # Update metadata columns, then upload the tables to the database. 
+        pass 
+
+else:
+    # FIRST RUN of History Layer
+    for table_name in list_of_stage_table_names:
+        stage_table = pd.read_sql_table(table_name, database_connect_target, schema='staging')
+        stage_table['etl_record_indicator'] = 'N'
+        # Update the etl_load_datetime and etl_effective_from fields 
+        now = pd.Timestamp.now(tz="UTC")
+        stage_table["etl_load_datetime"] = now
+        stage_table["etl_load_datetime"] = now
+        # Add the table_name and modified dataframe to the history_table_dict
+        table_name = table_name.replace(f'stage_{etl_source_code}_', '')
+        history_table_dict[table_name] = stage_table
   
 
 # Upload the table to the history layer 1st run 
